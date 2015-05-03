@@ -16,77 +16,44 @@ import com.virat.openglviewer.views.MyGLSurfaceView;
 import java.io.IOException;
 import java.io.InputStream;
 
-import rx.Observable;
-import rx.Subscriber;
-
 public class MainActivity extends Activity {
-
-  private Meshes meshes;
-  private View progressView;
-
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
     Logger.plant(new Logger.AndroidTree()); // Hook up logging
-    progressView = findViewById(R.id.progressBar);
 
-    loadOBJ(new Tuple("spiderman.obj", "spiderman.mtl"))
-        .subscribe(new Subscriber<Tuple>() {
+    final MyGLSurfaceView surfaceView = setupSurfaceViewRenderer(getMeshes());
+
+    // This is called on the very first render pass, when the scene
+    // is rendered for the first time.
+    surfaceView.setOnRenderListener(new MyGLRenderer.OnRenderListener() {
+      @Override
+      public void onRender(final Bitmap bitmap) {
+        // Use the bitmap in the mode chooser
+        runOnUiThread(new Runnable() {
           @Override
-          public void onCompleted() {
-            final MyGLSurfaceView surfaceView = setupSurfaceViewRenderer(meshes);
-
-            // This is called on the very first render pass, when the scene
-            // is rendered for the first time.
-            surfaceView.setOnRenderListener(new MyGLRenderer.OnRenderListener() {
-              @Override
-              public void onRender(final Bitmap bitmap) {
-                // Use the bitmap in the mode chooser
-                runOnUiThread(new Runnable() {
-                  @Override
-                  public void run() {
-
-                    progressView.animate().x(-progressView.getWidth()).setDuration(500).start();
-                  }
-                });
-              }
-            });
-          }
-
-          @Override
-          public void onError(Throwable e) {
-
-          }
-
-          @Override
-          public void onNext(Tuple tuple) {
-            try {
-              InputStream obj = getResources().getAssets().open(tuple.obj); // hardcoded for testing
-              InputStream mtl = getResources().getAssets().open(tuple.mtl); // hardcoded for testing
-              OBJConverter converter = new OBJConverter();
-              meshes = new Meshes(converter.parse(obj, mtl));
-
-            } catch (IOException e) {
-              Logger.error(e.getMessage());
-            }
-
+          public void run() {
+            View progressView = findViewById(R.id.progressBar);
+            progressView.animate().x(-progressView.getWidth()).setDuration(500).start();
           }
         });
-
-
-
-  }
-
-  private Observable<Tuple> loadOBJ(final Tuple tuple) {
-    return Observable.create(new Observable.OnSubscribe<Tuple>() {
-      @Override
-      public void call(Subscriber<? super Tuple> subscriber) {
-        subscriber.onNext(tuple);
-        subscriber.onCompleted();
       }
     });
+  }
+
+  private Meshes getMeshes() {
+    try {
+      InputStream obj = getResources().getAssets().open("spiderman.obj"); // hardcoded for testing
+      InputStream mtl = getResources().getAssets().open("spiderman.mtl"); // hardcoded for testing
+      OBJConverter converter = new OBJConverter();
+      return new Meshes(converter.parse(obj, mtl));
+
+    } catch (IOException e) {
+      Logger.error(e.getMessage());
+    }
+    return null;
   }
 
   private MyGLSurfaceView setupSurfaceViewRenderer(Meshes meshes) {
@@ -100,15 +67,5 @@ public class MainActivity extends Activity {
     surfaceView.setRenderer(renderer);
 
     return surfaceView;
-  }
-
-  private static class Tuple {
-    public final String obj;
-    public final String mtl;
-
-    private Tuple(String obj, String mtl) {
-      this.obj = obj;
-      this.mtl = mtl;
-    }
   }
 }

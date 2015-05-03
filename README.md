@@ -1,1 +1,1 @@
-A simple app to test my OpenGL skills
+A simple Android app to test my OpenGL skills

@@ -1,2 +1,1 @@
-# pointcloudviewer
-Point Cloud Viewer
+A simple app to test my OpenGL skills

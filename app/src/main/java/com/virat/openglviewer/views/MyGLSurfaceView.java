@@ -1,7 +1,6 @@
 package com.virat.openglviewer.views;
 
 import android.content.Context;
-import android.graphics.Rect;
 import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
@@ -9,23 +8,19 @@ import android.view.MotionEvent;
 public class MyGLSurfaceView extends GLSurfaceView {
   private static final float TOUCH_SCALE_FACTOR = 180.0f / 320;
 
-  private final MyGLRenderer mRenderer;
-  private float mPreviousX;
-  private float mPreviousY;
+  private  MyGLRenderer renderer;
+  private float previousX;
+  private float previousY;
   private long downTime;
 
   public MyGLSurfaceView(Context context, AttributeSet attrs) {
     super(context, attrs);
-
-    Rect size = new Rect();
-    if (!isInEditMode()) {
-      getWindowVisibleDisplayFrame(size);
-    }
-
     setEGLContextClientVersion(2);
+  }
 
-    mRenderer = new MyGLRenderer(context, size.right - size.left, size.bottom - size.top);
-    setRenderer(mRenderer);
+  public void setRenderer(MyGLRenderer renderer) {
+    this.renderer = renderer;
+    super.setRenderer(renderer);
     setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
   }
 
@@ -42,21 +37,32 @@ public class MyGLSurfaceView extends GLSurfaceView {
         downTime = event.getEventTime();
         break;
       case MotionEvent.ACTION_MOVE:
-        float dx = x - mPreviousX;
-        float dy = y - mPreviousY;
+        float dx = x - previousX;
+        float dy = y - previousY;
 
-        mRenderer.setAngleX(mRenderer.getAngleX() + ((dx) * TOUCH_SCALE_FACTOR));  // = 180.0f / 320
-        mRenderer.setAngleY(mRenderer.getAngleY() + ((dy) * TOUCH_SCALE_FACTOR));  // = 180.0f / 320
+        renderer.dy += (int) ((dy) * TOUCH_SCALE_FACTOR);
+        renderer.dx += (int) ((dx) * TOUCH_SCALE_FACTOR);
+        requestRender();
+
         requestRender();
         break;
+
+      case MotionEvent.ACTION_UP:
+        if (event.getEventTime() - downTime <= 250) {
+          renderer.onClick(x, y);
+          requestRender();
+
+          callOnClick();
+        }
+        break;
     }
-    mPreviousX = x;
-    mPreviousY = y;
+    previousX = x;
+    previousY = y;
 
     return true;
   }
 
   public void setOnRenderListener(MyGLRenderer.OnRenderListener onRenderListener) {
-    mRenderer.setOnRenderListener(onRenderListener);
+    renderer.setOnRenderListener(onRenderListener);
   }
 }

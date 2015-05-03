@@ -12,20 +12,21 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.opengl.GLSurfaceView.Renderer;
-import android.opengl.Matrix;
 
-import com.virat.openglviewer.opengl.FrameBuffer;
 import com.virat.openglviewer.R;
-import com.virat.openglviewer.pojo.OBJParser;
 import com.virat.openglviewer.objects.FrameBufferObject;
 import com.virat.openglviewer.objects.TextureObject;
+import com.virat.openglviewer.opengl.FrameBuffer;
+import com.virat.openglviewer.opengl.MatrixHelper;
+import com.virat.openglviewer.opengl.TextureHelper;
+import com.virat.openglviewer.opengl.Transform;
+import com.virat.openglviewer.pojos.Meshes;
 import com.virat.openglviewer.programs.PerspectiveShaderProgram;
 import com.virat.openglviewer.programs.TextureShaderProgram;
 import com.virat.openglviewer.utils.Logger;
-import com.virat.openglviewer.opengl.MatrixHelper;
-import com.virat.openglviewer.opengl.TextureHelper;
 
-import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -41,59 +42,69 @@ import static android.opengl.GLES30.glEnable;
 import static android.opengl.GLES30.glViewport;
 import static android.opengl.Matrix.multiplyMM;
 import static android.opengl.Matrix.orthoM;
-import static android.opengl.Matrix.rotateM;
-import static android.opengl.Matrix.scaleM;
 import static android.opengl.Matrix.setIdentityM;
-import static android.opengl.Matrix.translateM;
 
 public class MyGLRenderer implements Renderer {
   public static final int ALL_BUFFERS = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT;
-
+  public static final float[] AXIS_X = new float[]{1f, 0f, 0f};
+  public static final float[] AXIS_Y = new float[]{0f, 1f, 0f};
+  public static final float[] AXIS_Z = new float[]{0f, 0f, 1f};
+  public static final float Z_NEAR = 1f;
+  public static final float Z_FAR = 40f;
+  public static final float ZOOM_OUT = -3f;
   //////////////////////////////////////////////////////////////////////////////////////////////////
   // Default Values
   //////////////////////////////////////////////////////////////////////////////////////////////////
-  public static final float Z_NEAR = 1f;
-  public static final float Z_FAR = 40f;
+  public static final int DEFAULT_OIL_PAINT_RADIUS = 4;
+  public static final float DEFAULT_BOKEH_FOCAL_DEPTH = 10f;
+  public static final float DEFAULT_BOKEH_MAX_BLUR = 1f;
+  public static final float DEFAULT_SKETCH_INTENSITY = 1f;
+  public static final float DEFAULT_FENCE_REMOVAL_START = Z_FAR;
+  public static final float DEFAULT_FENCE_REMOVAL_END = Z_FAR;
 
   //////////////////////////////////////////////////////////////////////////////////////////////////
   // State variables
   //////////////////////////////////////////////////////////////////////////////////////////////////
-
   private final Context context;
+  private final Meshes meshes;
   private final int width;
   private final int height;
 
   private final float[] projectionMatrix = new float[16];
-  private final float[] viewMatrix = new float[16];
 
   private volatile float angleX;
   private volatile float angleY;
+  private float touchX;
+  private float touchY;
 
-  private TextureObject hulkObject;
-  private TextureObject spideyObject;
+  private List<TextureObject> textureObjects = new ArrayList<>();
+
   private FrameBufferObject frameBufferObject;
 
   private PerspectiveShaderProgram perspectiveShaderProgram;
   private TextureShaderProgram textureProgram;
 
-  private int hulkTexture;
-  private int spideyTexture;
-
   private FrameBuffer frameBuffer;
 
-  // Perspective shader variables
-  private float fenceRemovalStart = Z_FAR;
-  private float fenceRemovalEnd = Z_FAR;
+
+  // Fence removal variables
+  private float fenceRemovalStart = DEFAULT_FENCE_REMOVAL_START;
+  private float fenceRemovalEnd = DEFAULT_FENCE_REMOVAL_END;
 
   private OnRenderListener onRenderListener;
   private boolean isFirstRenderSent;
 
-  public static interface OnRenderListener {
+  private Transform transform = new Transform();
+  public float dx;
+  public float dy;
+
+  public interface OnRenderListener {
     void onRender(Bitmap bitmap);
   }
 
-  public MyGLRenderer(Context context, int width, int height) {
+  public MyGLRenderer(Context context, Meshes meshes, int width, int height) {
     this.context = context;
+    this.meshes = meshes;
     this.width = width;
     this.height = height;
   }
@@ -101,6 +112,11 @@ public class MyGLRenderer implements Renderer {
   //////////////////////////////////////////////////////////////////////////////////////////////////
   // Renderer Implementation
   //////////////////////////////////////////////////////////////////////////////////////////////////
+
+  public void onClick(float touchX, float touchY) {
+    this.touchX = touchX;
+    this.touchY = touchY;
+  }
 
   @Override
   public void onSurfaceCreated(GL10 glUnused, EGLConfig config) {
@@ -110,15 +126,12 @@ public class MyGLRenderer implements Renderer {
     perspectiveShaderProgram = new PerspectiveShaderProgram(context);
     textureProgram = new TextureShaderProgram(context);
 
-    // HULK
-    hulkObject = loadObject(R.raw.hulk);
-    final Bitmap slasherBitmap = createBitmap(context, R.drawable.hulk);
-    hulkTexture = TextureHelper.loadTexture(slasherBitmap);
+    float[] faces = meshes.subMeshes.get(0).faces;
+    Bitmap bitmap = createBitmap(context, R.drawable.spiderman);
+    int textureId = loadTexture(bitmap);
+    textureObjects.add(new TextureObject(faces, textureId));
 
-    // SPIDERMAN
-    spideyObject = loadObject(R.raw.spiderman);
-    final Bitmap dogBitmap = createBitmap(context, R.drawable.spiderman);
-    spideyTexture = TextureHelper.loadTexture(dogBitmap);
+    Logger.info("number of textures: " + textureObjects.size());
 
     // Surface for rendering frame buffer in Ortho projection
     frameBufferObject = new FrameBufferObject((float)height / (float) width);
@@ -126,16 +139,6 @@ public class MyGLRenderer implements Renderer {
     frameBuffer.create();
 
     Logger.info("[objParser finished] textures loaded");
-  }
-
-  // Very limited loading of an .obj object
-  private TextureObject loadObject(int resourceId) {
-    OBJParser objParser = new OBJParser();
-    try (InputStream inputStream = context.getResources().openRawResource(resourceId)) {
-      return objParser.parse(inputStream).get(0);
-    } catch (Exception e) {
-      throw new RuntimeException("There was a problem loading an .obj model: " + e.getMessage());
-    }
   }
 
   @Override
@@ -158,10 +161,9 @@ public class MyGLRenderer implements Renderer {
     glClear(ALL_BUFFERS);
     glEnable(GL_DEPTH_TEST);
 
-    moveCamera();
-
-    renderHulk();
-    renderSpidey();
+    float[] mvpMatrix = new float[16];
+    multiplyMM(mvpMatrix, 0, projectionMatrix, 0, getModelMatrix(), 0);
+    renderObjects(mvpMatrix);
 
     if (onRenderListener != null && !isFirstRenderSent) {
       isFirstRenderSent = true;
@@ -175,7 +177,7 @@ public class MyGLRenderer implements Renderer {
     glClear(ALL_BUFFERS);
     glEnable(GL_DEPTH_TEST);
 
-    // reset the matrix so we render a non rotated texture
+    // reset the matrix so we render a non rotated texture_mtl
     float[] modelMatrix = new float[16];
     setIdentityM(modelMatrix, 0);
 
@@ -183,27 +185,10 @@ public class MyGLRenderer implements Renderer {
     final float aspectRatio = (float) height / (float) width;
     orthoM(orthoMatrix, 0, -1f, 1f, -aspectRatio, aspectRatio, -1f, 1f);
 
-    final float[] mvpMatrix = new float[16];
+    mvpMatrix = new float[16];
     multiplyMM(mvpMatrix, 0, orthoMatrix, 0, modelMatrix, 0);
 
     renderPerspectiveEffect(mvpMatrix);
-  }
-
-  /**
-   * Position the camera (compute the View matrix).
-   * NOTE: This must be called before rendering anything to the scene.
-   */
-  private void moveCamera() {
-    float angle = angleX * 0.01f; // scale the angle, it's too fast
-
-    float radius = 5f;
-    float eyeX = (float) (radius * Math.cos(angle));
-    float eyeZ = (float) (radius * Math.sin(angle));
-    Matrix.setLookAtM(viewMatrix, 0,
-      eyeX, 0f, eyeZ, // eye position
-      0f, 0f, -2.5f, // position you want to look at
-      0f, 1.0f, 0.0f // up vector
-    );
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -236,61 +221,52 @@ public class MyGLRenderer implements Renderer {
   // Private Methods
   //////////////////////////////////////////////////////////////////////////////////////////////////
 
-  private void renderHulk() {
-    // translate
-    float[] mvpMatrix = getMvpMatrix(hulkObject,
-      0, // rotation Y
-      1f, // scale
-      0.15f, 0f, -3f // translation
-
-    );
-
-    perspectiveShaderProgram.useProgram();
-    perspectiveShaderProgram.setUniforms(mvpMatrix, hulkTexture, fenceRemovalStart, fenceRemovalEnd);
-    hulkObject.bindData(perspectiveShaderProgram);
-    hulkObject.draw();
+  private int loadTexture(Bitmap bitmap) {
+    return TextureHelper.loadTexture(bitmap);
   }
 
-  private void renderSpidey() {
-    // translate
-    float[] mvpMatrix = getMvpMatrix(spideyObject,
-      45, // rotation Y
-      1f, // scale
-      -0.45f, -0.35f, -1f // translation
-    );
-
-    perspectiveShaderProgram.useProgram();
-    perspectiveShaderProgram.setUniforms(mvpMatrix, spideyTexture, fenceRemovalStart, fenceRemovalEnd);
-    spideyObject.bindData(perspectiveShaderProgram);
-    spideyObject.draw();
+  private void renderObjects(float[] mvpMatrix) {
+    if (textureObjects != null) {
+      for (TextureObject textureObject : textureObjects) {
+        if (textureObject != null) {
+          perspectiveShaderProgram.useProgram();
+          perspectiveShaderProgram.setUniforms(mvpMatrix, textureObject.getTextureId(), fenceRemovalStart, fenceRemovalEnd);
+          textureObject.bindData(perspectiveShaderProgram);
+          textureObject.draw();
+        } else {
+          Logger.info("textureObject is null");
+        }
+      }
+    } else {
+      Logger.info("textureObjects is null");
+    }
   }
 
-  private float[] getMvpMatrix(TextureObject object, float rotationY, float scale,
-    float translationX, float translationY, float translationZ) {
+  private float[] getModelMatrix() {
+    float[] min = meshes.getExtents().min;
+    float[] max = meshes.getExtents().max;
 
-    final float[] modelMatrix = new float[16];
-    setIdentityM(modelMatrix, 0);
+    float xWidth = (max[0] - min[0]) / 2f;
+    float yWidth = (max[1] - min[1]) / 2f;
+    float zWidth = (max[2] - min[2]) / 2f;
 
-    // Move it back a little bit
-    translateM(modelMatrix, 0, translationX, translationY, translationZ);
+    // Find max width out of x, y, z widths and multiply by a constant to zoom object out
+    float maxWidth = (Math.max(xWidth, Math.max(yWidth, zWidth))) * ZOOM_OUT;
+    Logger.info("extents maxWidth: " + maxWidth);
 
-    // Apply rotation (if any)
-    rotateM(modelMatrix, 0, rotationY, 0f, 1f, 0f);
+    transform.position = new float[]{ 0f, 0f, maxWidth };
+    transform.preTranslate(new float[] {
+        -(max[0] + min[0]) / 2f, //
+        -(max[1] + min[1]) / 2f, //
+        -(max[2] + min[2]) / 2f //
+    });
+    transform.rotate(AXIS_Y, dx, Transform.Space.WORLD);
+    transform.rotate(AXIS_X, dy, Transform.Space.WORLD);
 
-    scaleM(modelMatrix, 0, scale, scale, scale);
+    dx = 0;
+    dy = 0;
 
-    // center the object
-    translateM(modelMatrix, 0, //
-
-      -(object.maxX() + object.minX()) / 2f, //
-      -(object.maxY() + object.minY()) / 2f, //
-      -(object.maxZ() + object.minZ()) / 2f //
-    );
-
-    final float[] mvpMatrix = new float[16];
-    multiplyMM(mvpMatrix, 0, viewMatrix, 0, modelMatrix, 0);
-    multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvpMatrix, 0);
-    return mvpMatrix;
+    return transform.localToWorldMatrix();
   }
 
   private Bitmap createBitmap(Context context, int resourceId) {
@@ -299,11 +275,11 @@ public class MyGLRenderer implements Renderer {
 
     // Read in the resource
     return BitmapFactory.decodeResource(
-      context.getResources(), resourceId, options);
+        context.getResources(), resourceId, options);
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////
-  // Post Processing Render Effects (Second pass draw from FrameBuffer texture)
+  // Post Processing Render Effects (Second pass draw from FrameBuffer texture_mtl)
   //////////////////////////////////////////////////////////////////////////////////////////////////
 
   private void renderPerspectiveEffect(float[] mvpMatrix) {
@@ -312,4 +288,5 @@ public class MyGLRenderer implements Renderer {
     frameBufferObject.bindData(textureProgram);
     frameBufferObject.draw();
   }
+
 }

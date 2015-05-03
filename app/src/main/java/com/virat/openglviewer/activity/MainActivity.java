@@ -19,6 +19,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 
+import rx.Observable;
+import rx.Subscriber;
+import rx.schedulers.Schedulers;
+
 public class MainActivity extends Activity {
 
   private Meshes meshes;
@@ -32,31 +36,60 @@ public class MainActivity extends Activity {
     Logger.plant(new Logger.AndroidTree()); // Hook up logging
     progressView = findViewById(R.id.progressBar);
 
-    try {
-      InputStream obj = getResources().getAssets().open("spiderman.obj"); // hardcoded for testing
-      InputStream mtl = getResources().getAssets().open("spiderman.mtl"); // hardcoded for testing
-      OBJConverter converter = new OBJConverter();
-      meshes = new Meshes(converter.parse(obj, mtl));
-
-    } catch (IOException e) {
-      Logger.error(e.getMessage());
-    }
-
-    final MyGLSurfaceView surfaceView = setupSurfaceViewRenderer(meshes);
-
-    // This is called on the very first render pass, when the scene
-    // is rendered for the first time.
-    surfaceView.setOnRenderListener(new MyGLRenderer.OnRenderListener() {
-      @Override
-      public void onRender(final Bitmap bitmap) {
-        // Use the bitmap in the mode chooser
-        runOnUiThread(new Runnable() {
+    loadOBJ(new Tuple("spiderman.obj", "spiderman.mtl"))
+        .subscribeOn(Schedulers.newThread())
+        .subscribe(new Subscriber<Tuple>() {
           @Override
-          public void run() {
+          public void onCompleted() {
+            final MyGLSurfaceView surfaceView = setupSurfaceViewRenderer(meshes);
 
-            progressView.animate().x(-progressView.getWidth()).setDuration(500).start();
+            // This is called on the very first render pass, when the scene
+            // is rendered for the first time.
+            surfaceView.setOnRenderListener(new MyGLRenderer.OnRenderListener() {
+              @Override
+              public void onRender(final Bitmap bitmap) {
+                // Use the bitmap in the mode chooser
+                runOnUiThread(new Runnable() {
+                  @Override
+                  public void run() {
+
+                    progressView.animate().x(-progressView.getWidth()).setDuration(500).start();
+                  }
+                });
+              }
+            });
+          }
+
+          @Override
+          public void onError(Throwable e) {
+
+          }
+
+          @Override
+          public void onNext(Tuple tuple) {
+            try {
+              InputStream obj = getResources().getAssets().open(tuple.obj); // hardcoded for testing
+              InputStream mtl = getResources().getAssets().open(tuple.mtl); // hardcoded for testing
+              OBJConverter converter = new OBJConverter();
+              meshes = new Meshes(converter.parse(obj, mtl));
+
+            } catch (IOException e) {
+              Logger.error(e.getMessage());
+            }
+
           }
         });
+
+
+
+  }
+
+  private Observable<Tuple> loadOBJ(final Tuple tuple) {
+    return Observable.create(new Observable.OnSubscribe<Tuple>() {
+      @Override
+      public void call(Subscriber<? super Tuple> subscriber) {
+        subscriber.onNext(tuple);
+        subscriber.onCompleted();
       }
     });
   }
@@ -74,11 +107,13 @@ public class MainActivity extends Activity {
     return surfaceView;
   }
 
-  private class ParseTask extends AsyncTask<OBJConverter, Void, Meshes> {
+  private static class Tuple {
+    public final String obj;
+    public final String mtl;
 
-    @Override
-    protected Meshes doInBackground(OBJConverter... params) {
-      return null;
+    private Tuple(String obj, String mtl) {
+      this.obj = obj;
+      this.mtl = mtl;
     }
   }
 }

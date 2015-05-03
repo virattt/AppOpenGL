@@ -3,25 +3,21 @@ package com.virat.openglviewer.activity;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Rect;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.view.View;
 
 import com.virat.openglviewer.R;
-import com.virat.openglviewer.pojos.Mesh;
 import com.virat.openglviewer.pojos.Meshes;
 import com.virat.openglviewer.pojos.OBJConverter;
 import com.virat.openglviewer.utils.Logger;
 import com.virat.openglviewer.views.MyGLRenderer;
 import com.virat.openglviewer.views.MyGLSurfaceView;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 
 import rx.Observable;
 import rx.Subscriber;
-import rx.schedulers.Schedulers;
 
 public class MainActivity extends Activity {
 
@@ -37,7 +33,6 @@ public class MainActivity extends Activity {
     progressView = findViewById(R.id.progressBar);
 
     loadOBJ(new Tuple("spiderman.obj", "spiderman.mtl"))
-        .subscribeOn(Schedulers.newThread())
         .subscribe(new Subscriber<Tuple>() {
           @Override
           public void onCompleted() {
